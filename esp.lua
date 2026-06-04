@@ -15,13 +15,13 @@ local settings = {
     
     -- BunnyHop настройки
     bhopEnabled = true,
-    bhopGroundCheck = true  -- проверка на земле (чтобы не прыгать в воздухе)
+    bhopGroundCheck = true
 }
 
 -- Хранилище обводок
 local activeHighlights = {}
 
--- ========== ESP ФУНКЦИИ ==========
+-- ========== ESP ФУНКЦИИ (исправлено) ==========
 local function updateESPForPlayer(player)
     if activeHighlights[player] then
         activeHighlights[player]:Destroy()
@@ -36,11 +36,11 @@ local function updateESPForPlayer(player)
     
     local highlight = Instance.new("Highlight")
     highlight.Name = "ESP_Chams"
-    highlight.FillTransparency = 1
+    highlight.FillTransparency = 1  -- только обводка, без заливки
     highlight.OutlineTransparency = 0
     highlight.OutlineColor = settings.espColor
     highlight.DepthMode = settings.espAlwaysOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-    highlight.OutlineThickness = 2
+    -- outlineThickness УДАЛЁН — его нет в Roblox
     highlight.Parent = character
     
     activeHighlights[player] = highlight
@@ -93,15 +93,16 @@ RunService.RenderStepped:Connect(function()
                       (UserInputService:IsKeyDown(Enum.KeyCode.W) and humanoid.MoveDirection.Magnitude > 0)
     
     if isRunning then
-        -- Проверка на земле
-        local isGrounded = humanoid.FloorMaterial ~= Enum.Material.Air or humanoid:GetState() == Enum.HumanoidStateType.Running or humanoid:GetState() == Enum.HumanoidStateType.Landed
-        
         if settings.bhopGroundCheck then
+            -- Проверка на земле
+            local isGrounded = humanoid.FloorMaterial ~= Enum.Material.Air or 
+                              humanoid:GetState() == Enum.HumanoidStateType.Running or 
+                              humanoid:GetState() == Enum.HumanoidStateType.Landed
+            
             if isGrounded then
                 humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
             end
         else
-            -- Простой банихоп без проверки (может прыгать в воздухе снова)
             humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
         end
     end
