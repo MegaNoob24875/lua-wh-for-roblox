@@ -1,6 +1,5 @@
--- BloxStrike: ESP + BunnyHop + Anti-Aim + 3rd Person (ИСПРАВЛЕН)
--- Нажми INSERT для открытия меню
--- Нажми P для переключения вида от 1/3 лица
+-- BloxStrike: Упрощённая версия (работает на Solara/Xeno)
+-- Нажми INSERT для меню, P для 3-го лица
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
@@ -8,189 +7,27 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Camera = workspace.CurrentCamera
 
+-- ========== ПРОВЕРКА ЭКЗЕКУТОРА ==========
+local isWeakExecutor = pcall(function() 
+    return syn and true or false 
+end) or false
+
+print("[✓] Скрипт загружен, режим: " .. (isWeakExecutor and "Weak" or "Normal"))
+
 -- ========== НАСТРОЙКИ ==========
 local settings = {
-    -- ESP
     espEnabled = true,
     espColor = Color3.fromRGB(255, 0, 0),
     espAlwaysOnTop = true,
-    
-    -- BunnyHop
     bhopEnabled = true,
-    bhopGroundCheck = true,
-    
-    -- Anti-Aim
-    antiAimEnabled = true,
-    antiAimType = "jitter",
-    antiAimYaw = 180,
-    
-    -- 3rd Person (исправлено)
-    thirdPersonEnabled = false,
-    thirdPersonDistance = 6,
-    thirdPersonHeight = 1.5
+    thirdPersonEnabled = false
 }
 
 local activeHighlights = {}
-local antiAimAngle = 0
-local lastTick = tick()
-
--- Сохраняем оригинальный тип камеры
-local originalCameraType = Camera.CameraType
-
--- ========== 3-Е ЛИЦО (ПОЛНОСТЬЮ ПЕРЕПИСАНО) ==========
-local function setThirdPerson(enabled)
-    settings.thirdPersonEnabled = enabled
-    
-    if enabled then
-        -- Сохраняем оригинальный тип камеры
-        originalCameraType = Camera.CameraType
-        Camera.CameraType = Enum.CameraType.Scriptable
-        
-        -- Немедленно обновляем позицию камеры
-        local character = LocalPlayer.Character
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local hrp = character.HumanoidRootPart
-            local lookDirection = Camera.CFrame.LookVector
-            
-            -- Если нет направления, используем направление от персонажа
-            if lookDirection.Magnitude < 0.1 then
-                lookDirection = Vector3.new(1, 0, 0)
-            end
-            
-            local cameraOffset = (lookDirection * Vector3.new(1, 0, 1)).unit * settings.thirdPersonDistance
-            local targetPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0) - cameraOffset
-            
-            Camera.CFrame = CFrame.new(targetPos, hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0))
-        end
-    else
-        -- Возвращаем стандартную камеру
-        Camera.CameraType = originalCameraType
-    end
-end
-
--- Обновление позиции камеры для 3 лица (плавное и стабильное)
-local function updateThirdPerson()
-    if not settings.thirdPersonEnabled then return end
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    -- Получаем направление камеры от мыши (только горизонтальное)
-    local mouseDirection = Camera.CFrame.LookVector
-    local horizontalDir = Vector3.new(mouseDirection.X, 0, mouseDirection.Z).unit
-    
-    if horizontalDir.Magnitude < 0.1 then
-        horizontalDir = Vector3.new(1, 0, 0)
-    end
-    
-    -- Позиция камеры позади персонажа
-    local cameraPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0) - (horizontalDir * settings.thirdPersonDistance)
-    
-    -- Цель для камеры (центр персонажа на уровне груди)
-    local targetPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0)
-    
-    -- Плавное перемещение без резких скачков
-    local smoothness = 0.25
-    local currentCFrame = Camera.CFrame
-    local newCFrame = CFrame.new(cameraPos, targetPos)
-    
-    -- Интерполяция для плавности
-    Camera.CFrame = currentCFrame:Lerp(newCFrame, smoothness)
-end
-
--- Бинд на P для переключения вида
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.P then
-        setThirdPerson(not settings.thirdPersonEnabled)
-        print("[✓] Вид от " .. (settings.thirdPersonEnabled and "3-го лица" or "1-го лица"))
-    end
-end)
-
--- ========== ANTI-AIM ==========
-local function updateAntiAim()
-    if not settings.antiAimEnabled then return end
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local currentCFrame = hrp.CFrame
-    local newYaw = 0
-    
-    if settings.antiAimType == "jitter" then
-        antiAimAngle = (antiAimAngle + 45) % 360
-        newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
-        
-    elseif settings.antiAimType == "spin" then
-        antiAimAngle = (antiAimAngle + 15) % 360
-        newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
-        
-    elseif settings.antiAimType == "static" then
-        newYaw = math.rad(settings.antiAimYaw)
-    end
-    
-    hrp.CFrame = CFrame.new(currentCFrame.Position) * CFrame.Angles(0, newYaw, 0)
-end
-
-RunService.RenderStepped:Connect(function()
-    if settings.antiAimEnabled and tick() - lastTick > 0.05 then
-        lastTick = tick()
-        updateAntiAim()
-    end
-end)
-
--- ========== ESP ==========
-local function updateESPForPlayer(player)
-    if activeHighlights[player] then
-        activeHighlights[player]:Destroy()
-        activeHighlights[player] = nil
-    end
-    
-    if not settings.espEnabled then return end
-    if player == LocalPlayer then return end
-    
-    local character = player.Character
-    if not character then return end
-    
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Chams"
-    highlight.FillTransparency = 1
-    highlight.OutlineTransparency = 0
-    highlight.OutlineColor = settings.espColor
-    highlight.DepthMode = settings.espAlwaysOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-    highlight.Parent = character
-    
-    activeHighlights[player] = highlight
-end
-
-local function updateAllESP()
-    for player, highlight in pairs(activeHighlights) do
-        if highlight and highlight.Parent then
-            highlight.OutlineColor = settings.espColor
-            highlight.DepthMode = settings.espAlwaysOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-        else
-            activeHighlights[player] = nil
-        end
-    end
-    
-    for _, player in ipairs(Players:GetPlayers()) do
-        if not activeHighlights[player] and settings.espEnabled and player ~= LocalPlayer then
-            updateESPForPlayer(player)
-        end
-    end
-end
-
--- ========== BUNNYHOP ==========
-local humanoid = nil
 local character = nil
+local humanoid = nil
 
+-- ========== ОБНОВЛЕНИЕ ПЕРСОНАЖА ==========
 local function updateCharacter()
     character = LocalPlayer.Character
     if character then
@@ -201,10 +38,52 @@ end
 LocalPlayer.CharacterAdded:Connect(function(newChar)
     character = newChar
     humanoid = character and character:FindFirstChild("Humanoid")
-    -- Если было включено 3 лицо, переключаем камеру заново
+    task.wait(0.5)
     if settings.thirdPersonEnabled then
-        task.wait(0.5)
         setThirdPerson(true)
+    end
+end)
+
+-- ========== 3-Е ЛИЦО (УПРОЩЁННАЯ ВЕРСИЯ) ==========
+local function setThirdPerson(enabled)
+    settings.thirdPersonEnabled = enabled
+    
+    if enabled then
+        -- Простой способ: просто меняем тип камеры
+        Camera.CameraSubject = character
+        Camera.CameraType = Enum.CameraType.Follow
+        -- Увеличиваем расстояние
+        Camera.FieldOfView = 70
+        print("[✓] 3-е лицо включено")
+    else
+        Camera.CameraType = Enum.CameraType.Custom
+        Camera.CameraSubject = nil
+        print("[✓] 1-е лицо включено")
+    end
+end
+
+-- Бинд на P
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.P then
+        setThirdPerson(not settings.thirdPersonEnabled)
+    end
+end)
+
+-- ========== BUNNYHOP (УПРОЩЁННЫЙ) ==========
+local spacePressed = false
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Space and settings.bhopEnabled then
+        spacePressed = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        spacePressed = false
     end
 end)
 
@@ -214,38 +93,65 @@ RunService.RenderStepped:Connect(function()
     updateCharacter()
     if not humanoid then return end
     
-    local isRunning = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or 
-                      UserInputService:IsKeyDown(Enum.KeyCode.RightShift) or
-                      (UserInputService:IsKeyDown(Enum.KeyCode.W) and humanoid.MoveDirection.Magnitude > 0)
-    
-    if isRunning then
-        if settings.bhopGroundCheck then
-            local isGrounded = humanoid.FloorMaterial ~= Enum.Material.Air or 
-                              humanoid:GetState() == Enum.HumanoidStateType.Running or 
-                              humanoid:GetState() == Enum.HumanoidStateType.Landed
-            if isGrounded then
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
-        else
+    -- Простая проверка: если зажат пробел и персонаж на земле
+    if spacePressed then
+        local isGrounded = humanoid.FloorMaterial ~= Enum.Material.Air or 
+                          humanoid:GetState() == Enum.HumanoidStateType.Running or 
+                          humanoid:GetState() == Enum.HumanoidStateType.Landed
+        if isGrounded then
             humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
         end
     end
 end)
 
--- Обновление камеры для 3 лица
-RunService.RenderStepped:Connect(function()
-    updateThirdPerson()
-end)
+-- ========== ESP (БЕЗ OutlineThickness) ==========
+local function updateESPForPlayer(player)
+    if activeHighlights[player] then
+        activeHighlights[player]:Destroy()
+        activeHighlights[player] = nil
+    end
+    
+    if not settings.espEnabled then return end
+    if player == LocalPlayer then return end
+    
+    local char = player.Character
+    if not char then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Chams"
+    highlight.FillTransparency = 1
+    highlight.OutlineTransparency = 0
+    highlight.OutlineColor = settings.espColor
+    highlight.DepthMode = settings.espAlwaysOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+    highlight.Parent = char
+    
+    activeHighlights[player] = highlight
+end
+
+local function updateAllESP()
+    for player, highlight in pairs(activeHighlights) do
+        if highlight and highlight.Parent then
+            highlight.OutlineColor = settings.espColor
+            highlight.DepthMode = settings.espAlwaysOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+        end
+    end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if not activeHighlights[player] and settings.espEnabled and player ~= LocalPlayer then
+            updateESPForPlayer(player)
+        end
+    end
+end
 
 -- ========== МЕНЮ ==========
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "BloxStrike_Menu"
+screenGui.Name = "ESP_Menu"
 screenGui.Parent = game:GetService("CoreGui")
 
 local menuFrame = Instance.new("Frame")
-menuFrame.Size = UDim2.new(0, 320, 0, 520)
-menuFrame.Position = UDim2.new(0.5, -160, 0.5, -260)
-menuFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+menuFrame.Size = UDim2.new(0, 250, 0, 280)
+menuFrame.Position = UDim2.new(0.5, -125, 0.5, -140)
+menuFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 menuFrame.BackgroundTransparency = 0.1
 menuFrame.BorderSizePixel = 0
 menuFrame.Visible = false
@@ -253,303 +159,83 @@ menuFrame.Parent = screenGui
 
 -- Заголовок
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 40)
-titleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+titleBar.Size = UDim2.new(1, 0, 0, 35)
+titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = menuFrame
 
 local titleText = Instance.new("TextLabel")
-titleText.Size = UDim2.new(1, 0, 1, 0)
+titleText.Size = UDim2.new(1, -30, 1, 0)
+titleText.Position = UDim2.new(0, 5, 0, 0)
 titleText.BackgroundTransparency = 1
-titleText.Text = "BLOXSTRIKE | ESP + BHOP + AA + 3P"
+titleText.Text = "BLOXSTRIKE MENU"
 titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleText.TextSize = 14
 titleText.Font = Enum.Font.GothamBold
-titleText.TextXAlignment = Enum.TextXAlignment.Center
+titleText.TextXAlignment = Enum.TextXAlignment.Left
 titleText.Parent = titleBar
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 35, 1, 0)
-closeBtn.Position = UDim2.new(1, -35, 0, 0)
+closeBtn.Size = UDim2.new(0, 30, 1, 0)
+closeBtn.Position = UDim2.new(1, -30, 0, 0)
 closeBtn.BackgroundTransparency = 1
 closeBtn.Text = "✕"
 closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-closeBtn.TextSize = 18
+closeBtn.TextSize = 16
 closeBtn.Font = Enum.Font.GothamBold
 closeBtn.Parent = titleBar
 closeBtn.MouseButton1Click:Connect(function()
     menuFrame.Visible = false
 end)
 
--- Перетаскивание
-local dragging = false
-local dragStartPos, frameStartPos
-
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStartPos = input.Position
-        frameStartPos = menuFrame.Position
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStartPos
-        menuFrame.Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X, frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, 0, 1, -40)
-content.Position = UDim2.new(0, 0, 0, 40)
+content.Size = UDim2.new(1, 0, 1, -35)
+content.Position = UDim2.new(0, 0, 0, 35)
 content.BackgroundTransparency = 1
 content.Parent = menuFrame
 
--- Вспомогательные функции
-local function createSectionHeader(text, yPos)
-    local header = Instance.new("TextLabel")
-    header.Size = UDim2.new(1, -20, 0, 25)
-    header.Position = UDim2.new(0, 10, 0, yPos)
-    header.BackgroundTransparency = 1
-    header.Text = text
-    header.TextColor3 = Color3.fromRGB(255, 200, 100)
-    header.TextSize = 14
-    header.Font = Enum.Font.GothamBold
-    header.TextXAlignment = Enum.TextXAlignment.Left
-    header.Parent = content
-    return header
-end
-
-local function createToggle(text, yPos, settingName, isEspSetting)
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -20, 0, 40)
-    frame.Position = UDim2.new(0, 10, 0, yPos)
-    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    frame.BorderSizePixel = 0
-    frame.Parent = content
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.6, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.TextSize = 13
-    label.Font = Enum.Font.Gotham
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = frame
-    
+local function createToggle(text, yPos, settingName)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 60, 0, 28)
-    btn.Position = UDim2.new(1, -70, 0.5, -14)
-    btn.BackgroundColor3 = settings[settingName] and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(180, 70, 70)
-    btn.Text = settings[settingName] and "ON" or "OFF"
+    btn.Size = UDim2.new(0.9, 0, 0, 35)
+    btn.Position = UDim2.new(0.05, 0, 0, yPos)
+    btn.BackgroundColor3 = settings[settingName] and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(55, 55, 70)
+    btn.Text = text .. " : " .. (settings[settingName] and "ON" or "OFF")
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 12
-    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.Font = Enum.Font.Gotham
     btn.BorderSizePixel = 0
-    btn.Parent = frame
+    btn.Parent = content
     
     btn.MouseButton1Click:Connect(function()
         settings[settingName] = not settings[settingName]
-        btn.BackgroundColor3 = settings[settingName] and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(180, 70, 70)
-        btn.Text = settings[settingName] and "ON" or "OFF"
+        btn.BackgroundColor3 = settings[settingName] and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(55, 55, 70)
+        btn.Text = text .. " : " .. (settings[settingName] and "ON" or "OFF")
         
-        if isEspSetting then
-            if settingName == "espEnabled" then
-                updateAllESP()
-            elseif settingName == "espAlwaysOnTop" then
-                updateAllESP()
-            end
-        end
-    end)
-end
-
-local function createDropdown(text, options, yPos, settingName)
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -20, 0, 60)
-    frame.Position = UDim2.new(0, 10, 0, yPos)
-    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    frame.BorderSizePixel = 0
-    frame.Parent = content
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 0, 25)
-    label.Position = UDim2.new(0, 0, 0, 5)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.TextSize = 13
-    label.Font = Enum.Font.Gotham
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = frame
-    
-    local currentValue = settings[settingName]
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 30)
-    btn.Position = UDim2.new(0, 0, 0, 28)
-    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
-    btn.Text = currentValue
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.TextSize = 12
-    btn.Font = Enum.Font.Gotham
-    btn.BorderSizePixel = 0
-    btn.Parent = frame
-    
-    local expanded = false
-    local dropdownFrame = nil
-    
-    btn.MouseButton1Click:Connect(function()
-        if expanded then
-            if dropdownFrame then dropdownFrame:Destroy() end
-            expanded = false
-            return
-        end
-        
-        expanded = true
-        dropdownFrame = Instance.new("Frame")
-        dropdownFrame.Size = UDim2.new(1, 0, 0, #options * 30)
-        dropdownFrame.Position = UDim2.new(0, 0, 0, 58)
-        dropdownFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
-        dropdownFrame.BorderSizePixel = 0
-        dropdownFrame.Parent = frame
-        
-        for i, option in ipairs(options) do
-            local optionBtn = Instance.new("TextButton")
-            optionBtn.Size = UDim2.new(1, 0, 0, 30)
-            optionBtn.Position = UDim2.new(0, 0, 0, (i-1) * 30)
-            optionBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 70)
-            optionBtn.Text = option
-            optionBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-            optionBtn.TextSize = 12
-            optionBtn.Font = Enum.Font.Gotham
-            optionBtn.BorderSizePixel = 0
-            optionBtn.Parent = dropdownFrame
-            
-            optionBtn.MouseButton1Click:Connect(function()
-                settings[settingName] = option
-                btn.Text = option
-                dropdownFrame:Destroy()
-                expanded = false
-            end)
-        end
-    end)
-end
-
-local function createSlider(text, minVal, maxVal, yPos, settingName, formatFunc)
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -20, 0, 55)
-    frame.Position = UDim2.new(0, 10, 0, yPos)
-    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    frame.BorderSizePixel = 0
-    frame.Parent = content
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 0, 25)
-    label.Position = UDim2.new(0, 0, 0, 5)
-    label.BackgroundTransparency = 1
-    label.Text = text .. ": " .. (formatFunc and formatFunc(settings[settingName]) or tostring(settings[settingName]))
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.TextSize = 12
-    label.Font = Enum.Font.Gotham
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = frame
-    
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Size = UDim2.new(1, -20, 0, 4)
-    sliderBg.Position = UDim2.new(0, 10, 0, 40)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
-    sliderBg.BorderSizePixel = 0
-    sliderBg.Parent = frame
-    
-    local percent = (settings[settingName] - minVal) / (maxVal - minVal)
-    local sliderFill = Instance.new("Frame")
-    sliderFill.Size = UDim2.new(percent, 0, 1, 0)
-    sliderFill.BackgroundColor3 = Color3.fromRGB(76, 175, 80)
-    sliderFill.BorderSizePixel = 0
-    sliderFill.Parent = sliderBg
-    
-    local sliderBtn = Instance.new("TextButton")
-    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
-    sliderBtn.Position = UDim2.new(percent, -8, 0.5, -8)
-    sliderBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    sliderBtn.BorderSizePixel = 0
-    sliderBtn.Text = ""
-    sliderBtn.Parent = sliderBg
-    
-    local sliding = false
-    
-    local function updateSlider(inputPos)
-        local sliderAbsPos = sliderBg.AbsolutePosition.X
-        local sliderWidth = sliderBg.AbsoluteSize.X
-        local newPercent = math.clamp((inputPos.X - sliderAbsPos) / sliderWidth, 0, 1)
-        local value = minVal + newPercent * (maxVal - minVal)
-        
-        settings[settingName] = value
-        sliderFill.Size = UDim2.new(newPercent, 0, 1, 0)
-        sliderBtn.Position = UDim2.new(newPercent, -8, 0.5, -8)
-        label.Text = text .. ": " .. (formatFunc and formatFunc(value) or tostring(math.floor(value * 10) / 10))
-    end
-    
-    sliderBtn.MouseButton1Down:Connect(function()
-        sliding = true
-        updateSlider(UserInputService:GetMouseLocation())
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then
-            updateSlider(input.Position)
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            sliding = false
+        if settingName == "espEnabled" or settingName == "espAlwaysOnTop" then
+            updateAllESP()
         end
     end)
 end
 
 local function createColorPicker(yPos)
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -20, 0, 55)
-    frame.Position = UDim2.new(0, 10, 0, yPos)
-    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    frame.BorderSizePixel = 0
-    frame.Parent = content
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 0, 25)
-    label.Position = UDim2.new(0, 0, 0, 5)
-    label.BackgroundTransparency = 1
-    label.Text = "Цвет обводки:"
-    label.TextColor3 = Color3.fromRGB(220, 220, 220)
-    label.TextSize = 12
-    label.Font = Enum.Font.Gotham
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Parent = frame
-    
     local colors = {
-        {Color3.fromRGB(255, 0, 0), "🔴"},
-        {Color3.fromRGB(0, 255, 0), "🟢"},
-        {Color3.fromRGB(0, 0, 255), "🔵"},
-        {Color3.fromRGB(255, 255, 0), "🟡"},
-        {Color3.fromRGB(255, 0, 255), "🟣"}
+        {Color3.fromRGB(255, 0, 0), "Красный"},
+        {Color3.fromRGB(0, 255, 0), "Зелёный"},
+        {Color3.fromRGB(0, 0, 255), "Синий"},
+        {Color3.fromRGB(255, 255, 0), "Жёлтый"}
     }
     
     for i, colorData in ipairs(colors) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 45, 0, 28)
-        btn.Position = UDim2.new(0, (i-1) * 50 + 5, 0, 28)
+        btn.Size = UDim2.new(0.2, -5, 0, 30)
+        btn.Position = UDim2.new(0.05 + (i-1) * 0.23, 0, 0, yPos)
         btn.BackgroundColor3 = colorData[1]
-        btn.Text = ""
+        btn.Text = colorData[2]
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextSize = 11
+        btn.Font = Enum.Font.Gotham
         btn.BorderSizePixel = 0
-        btn.Parent = frame
+        btn.Parent = content
         
         btn.MouseButton1Click:Connect(function()
             settings.espColor = colorData[1]
@@ -558,60 +244,31 @@ local function createColorPicker(yPos)
     end
 end
 
--- СБОРКА МЕНЮ
-local yOffset = 10
+-- Сборка меню
+local y = 10
+createToggle("ESP (обводка)", y, "espEnabled")
+y = y + 45
+createToggle("Сквозь стены", y, "espAlwaysOnTop")
+y = y + 45
+createToggle("BunnyHop (авто-прыжок)", y, "bhopEnabled")
+y = y + 45
+createToggle("3-е лицо (P)", y, "thirdPersonEnabled")
+y = y + 55
+createColorPicker(y)
 
--- Секция: Anti-Aim
-createSectionHeader("🎯 ANTI-AIM", yOffset)
-yOffset = yOffset + 30
-createToggle("Включить Anti-Aim", yOffset, "antiAimEnabled", false)
-yOffset = yOffset + 50
-createDropdown("Тип Anti-Aim", {"jitter", "spin", "static"}, yOffset, "antiAimType")
+-- Подсказка
+local hint = Instance.new("TextLabel")
+hint.Size = UDim2.new(1, -20, 0, 25)
+hint.Position = UDim2.new(0, 10, 0, y + 45)
+hint.BackgroundTransparency = 1
+hint.Text = "Нажми P для 3-го лица"
+hint.TextColor3 = Color3.fromRGB(150, 150, 170)
+hint.TextSize = 11
+hint.Font = Enum.Font.Gotham
+hint.TextXAlignment = Enum.TextXAlignment.Center
+hint.Parent = content
 
-yOffset = yOffset + 80
-
--- Секция: BunnyHop
-createSectionHeader("🦘 BUNNYHOP", yOffset)
-yOffset = yOffset + 30
-createToggle("Включить BunnyHop", yOffset, "bhopEnabled", false)
-yOffset = yOffset + 50
-createToggle("Проверка на земле", yOffset, "bhopGroundCheck", false)
-
-yOffset = yOffset + 60
-
--- Секция: 3rd Person
-createSectionHeader("📷 КАМЕРА (3-Е ЛИЦО)", yOffset)
-yOffset = yOffset + 30
-createToggle("Включить 3-е лицо", yOffset, "thirdPersonEnabled", false)
-yOffset = yOffset + 55
-createSlider("Дистанция", 3, 12, yOffset, "thirdPersonDistance", function(v) return tostring(math.floor(v * 10) / 10) .. " м" end)
-yOffset = yOffset + 65
-createSlider("Высота камеры", 0.5, 3, yOffset, "thirdPersonHeight", function(v) return tostring(math.floor(v * 10) / 10) .. " м" end)
-
-yOffset = yOffset + 70
-local hintLabel = Instance.new("TextLabel")
-hintLabel.Size = UDim2.new(1, -20, 0, 25)
-hintLabel.Position = UDim2.new(0, 10, 0, yOffset)
-hintLabel.BackgroundTransparency = 1
-hintLabel.Text = "💡 Или нажми P для быстрого переключения"
-hintLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
-hintLabel.TextSize = 11
-hintLabel.Font = Enum.Font.Gotham
-hintLabel.TextXAlignment = Enum.TextXAlignment.Left
-hintLabel.Parent = content
-
-yOffset = yOffset + 40
-
--- Секция: ESP
-createSectionHeader("👁️ ESP", yOffset)
-yOffset = yOffset + 30
-createToggle("Включить ESP", yOffset, "espEnabled", true)
-yOffset = yOffset + 50
-createToggle("Сквозь стены", yOffset, "espAlwaysOnTop", true)
-yOffset = yOffset + 65
-createColorPicker(yOffset)
-
--- ИНИЦИАЛИЗАЦИЯ
+-- ========== ИНИЦИАЛИЗАЦИЯ ==========
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         if player.Character then
@@ -646,16 +303,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    updateCharacter()
-end)
 updateCharacter()
+updateAllESP()
 
--- Автоматически включаем 3 лицо при старте (для теста)
--- setThirdPerson(true) -- раскомментируй если хочешь автоматически включать
-
-print("✅ BloxStrike загружен!")
-print("📌 Нажми INSERT для меню")
-print("🎯 P для переключения 1/3 лица")
-print("📷 В меню можно настроить дистанцию и высоту камеры")
+print("✅ Загружено!")
+print("📌 INSERT - меню")
+print("🎮 P - 3-е лицо")
+print("🦘 Зажми ПРОБЕЛ для BunnyHop")
