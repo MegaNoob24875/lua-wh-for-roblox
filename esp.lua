@@ -1,4 +1,4 @@
--- BloxStrike: ESP + BunnyHop + Anti-Aim + 3rd Person
+-- BloxStrike: ESP + BunnyHop + Anti-Aim + 3rd Person (ИСПРАВЛЕН)
 -- Нажми INSERT для открытия меню
 -- Нажми P для переключения вида от 1/3 лица
 
@@ -21,37 +21,54 @@ local settings = {
     
     -- Anti-Aim
     antiAimEnabled = true,
-    antiAimType = "jitter", -- "jitter", "spin", "static"
-    antiAimYaw = 180, -- дополнительное вращение
+    antiAimType = "jitter",
+    antiAimYaw = 180,
     
-    -- 3rd Person
+    -- 3rd Person (исправлено)
     thirdPersonEnabled = false,
-    thirdPersonDistance = 8
+    thirdPersonDistance = 6,
+    thirdPersonHeight = 1.5
 }
 
 local activeHighlights = {}
 local antiAimAngle = 0
 local lastTick = tick()
 
--- ========== 3-Е ЛИЦО ПО БИНДУ ==========
+-- Сохраняем оригинальный тип камеры
+local originalCameraType = Camera.CameraType
+
+-- ========== 3-Е ЛИЦО (ПОЛНОСТЬЮ ПЕРЕПИСАНО) ==========
 local function setThirdPerson(enabled)
     settings.thirdPersonEnabled = enabled
+    
     if enabled then
+        -- Сохраняем оригинальный тип камеры
+        originalCameraType = Camera.CameraType
         Camera.CameraType = Enum.CameraType.Scriptable
-        -- Сохраняем текущую позицию камеры относительно персонажа
+        
+        -- Немедленно обновляем позицию камеры
         local character = LocalPlayer.Character
         if character and character:FindFirstChild("HumanoidRootPart") then
             local hrp = character.HumanoidRootPart
-            local direction = (Camera.CFrame.Position - hrp.Position).unit
-            local newPos = hrp.Position + direction * settings.thirdPersonDistance
-            Camera.CFrame = CFrame.new(newPos, hrp.Position)
+            local lookDirection = Camera.CFrame.LookVector
+            
+            -- Если нет направления, используем направление от персонажа
+            if lookDirection.Magnitude < 0.1 then
+                lookDirection = Vector3.new(1, 0, 0)
+            end
+            
+            local cameraOffset = (lookDirection * Vector3.new(1, 0, 1)).unit * settings.thirdPersonDistance
+            local targetPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0) - cameraOffset
+            
+            Camera.CFrame = CFrame.new(targetPos, hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0))
         end
     else
-        Camera.CameraType = Enum.CameraType.Custom
+        -- Возвращаем стандартную камеру
+        Camera.CameraType = originalCameraType
     end
 end
 
--- Обновление позиции камеры для 3 лица
+-- Обновление позиции камеры для 3 лица (плавное и стабильное)
 local function updateThirdPerson()
     if not settings.thirdPersonEnabled then return end
     
@@ -61,17 +78,27 @@ local function updateThirdPerson()
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Получаем направление камеры от мыши
-    local mouseDirection = (Camera.CFrame.LookVector * Vector3.new(1, 0, 1)).unit
-    if mouseDirection.Magnitude < 0.1 then
-        mouseDirection = Vector3.new(1, 0, 0)
+    -- Получаем направление камеры от мыши (только горизонтальное)
+    local mouseDirection = Camera.CFrame.LookVector
+    local horizontalDir = Vector3.new(mouseDirection.X, 0, mouseDirection.Z).unit
+    
+    if horizontalDir.Magnitude < 0.1 then
+        horizontalDir = Vector3.new(1, 0, 0)
     end
     
-    local cameraOffset = mouseDirection * settings.thirdPersonDistance
-    local targetPos = hrp.Position + Vector3.new(0, 1.5, 0) + cameraOffset
+    -- Позиция камеры позади персонажа
+    local cameraPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0) - (horizontalDir * settings.thirdPersonDistance)
     
-    -- Плавное движение камеры
-    Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(targetPos, hrp.Position + Vector3.new(0, 1.5, 0)), 0.3)
+    -- Цель для камеры (центр персонажа на уровне груди)
+    local targetPos = hrp.Position + Vector3.new(0, settings.thirdPersonHeight, 0)
+    
+    -- Плавное перемещение без резких скачков
+    local smoothness = 0.25
+    local currentCFrame = Camera.CFrame
+    local newCFrame = CFrame.new(cameraPos, targetPos)
+    
+    -- Интерполяция для плавности
+    Camera.CFrame = currentCFrame:Lerp(newCFrame, smoothness)
 end
 
 -- Бинд на P для переключения вида
@@ -94,30 +121,24 @@ local function updateAntiAim()
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Получаем текущее вращение
     local currentCFrame = hrp.CFrame
-    local currentAngle = currentCFrame.Y
+    local newYaw = 0
     
     if settings.antiAimType == "jitter" then
-        -- Дёргающаяся голова (быстро меняется угол)
         antiAimAngle = (antiAimAngle + 45) % 360
-        local newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
-        hrp.CFrame = CFrame.new(currentCFrame.Position) * CFrame.Angles(0, newYaw, 0)
+        newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
         
     elseif settings.antiAimType == "spin" then
-        -- Постоянное вращение
         antiAimAngle = (antiAimAngle + 15) % 360
-        local newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
-        hrp.CFrame = CFrame.new(currentCFrame.Position) * CFrame.Angles(0, newYaw, 0)
+        newYaw = math.rad(antiAimAngle + settings.antiAimYaw)
         
     elseif settings.antiAimType == "static" then
-        -- Фиксированный угол
-        local newYaw = math.rad(settings.antiAimYaw)
-        hrp.CFrame = CFrame.new(currentCFrame.Position) * CFrame.Angles(0, newYaw, 0)
+        newYaw = math.rad(settings.antiAimYaw)
     end
+    
+    hrp.CFrame = CFrame.new(currentCFrame.Position) * CFrame.Angles(0, newYaw, 0)
 end
 
--- Запуск Anti-Aim в цикле (оптимизировано)
 RunService.RenderStepped:Connect(function()
     if settings.antiAimEnabled and tick() - lastTick > 0.05 then
         lastTick = tick()
@@ -125,7 +146,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ========== ESP (БЕЗ OutlineThickness) ==========
+-- ========== ESP ==========
 local function updateESPForPlayer(player)
     if activeHighlights[player] then
         activeHighlights[player]:Destroy()
@@ -180,6 +201,11 @@ end
 LocalPlayer.CharacterAdded:Connect(function(newChar)
     character = newChar
     humanoid = character and character:FindFirstChild("Humanoid")
+    -- Если было включено 3 лицо, переключаем камеру заново
+    if settings.thirdPersonEnabled then
+        task.wait(0.5)
+        setThirdPerson(true)
+    end
 end)
 
 RunService.RenderStepped:Connect(function()
@@ -208,9 +234,7 @@ end)
 
 -- Обновление камеры для 3 лица
 RunService.RenderStepped:Connect(function()
-    if settings.thirdPersonEnabled then
-        updateThirdPerson()
-    end
+    updateThirdPerson()
 end)
 
 -- ========== МЕНЮ ==========
@@ -219,8 +243,8 @@ screenGui.Name = "BloxStrike_Menu"
 screenGui.Parent = game:GetService("CoreGui")
 
 local menuFrame = Instance.new("Frame")
-menuFrame.Size = UDim2.new(0, 320, 0, 500)
-menuFrame.Position = UDim2.new(0.5, -160, 0.5, -250)
+menuFrame.Size = UDim2.new(0, 320, 0, 520)
+menuFrame.Position = UDim2.new(0.5, -160, 0.5, -260)
 menuFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 menuFrame.BackgroundTransparency = 0.1
 menuFrame.BorderSizePixel = 0
@@ -416,26 +440,77 @@ local function createDropdown(text, options, yPos, settingName)
             end)
         end
     end)
+end
+
+local function createSlider(text, minVal, maxVal, yPos, settingName, formatFunc)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -20, 0, 55)
+    frame.Position = UDim2.new(0, 10, 0, yPos)
+    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    frame.BorderSizePixel = 0
+    frame.Parent = content
     
-    -- Закрыть при клике вне
-    local function closeDropdown()
-        if dropdownFrame then
-            dropdownFrame:Destroy()
-            expanded = false
-        end
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 25)
+    label.Position = UDim2.new(0, 0, 0, 5)
+    label.BackgroundTransparency = 1
+    label.Text = text .. ": " .. (formatFunc and formatFunc(settings[settingName]) or tostring(settings[settingName]))
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+    
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 4)
+    sliderBg.Position = UDim2.new(0, 10, 0, 40)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = frame
+    
+    local percent = (settings[settingName] - minVal) / (maxVal - minVal)
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Size = UDim2.new(percent, 0, 1, 0)
+    sliderFill.BackgroundColor3 = Color3.fromRGB(76, 175, 80)
+    sliderFill.BorderSizePixel = 0
+    sliderFill.Parent = sliderBg
+    
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Size = UDim2.new(0, 16, 0, 16)
+    sliderBtn.Position = UDim2.new(percent, -8, 0.5, -8)
+    sliderBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    sliderBtn.BorderSizePixel = 0
+    sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
+    
+    local sliding = false
+    
+    local function updateSlider(inputPos)
+        local sliderAbsPos = sliderBg.AbsolutePosition.X
+        local sliderWidth = sliderBg.AbsoluteSize.X
+        local newPercent = math.clamp((inputPos.X - sliderAbsPos) / sliderWidth, 0, 1)
+        local value = minVal + newPercent * (maxVal - minVal)
+        
+        settings[settingName] = value
+        sliderFill.Size = UDim2.new(newPercent, 0, 1, 0)
+        sliderBtn.Position = UDim2.new(newPercent, -8, 0.5, -8)
+        label.Text = text .. ": " .. (formatFunc and formatFunc(value) or tostring(math.floor(value * 10) / 10))
     end
     
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
+    sliderBtn.MouseButton1Down:Connect(function()
+        sliding = true
+        updateSlider(UserInputService:GetMouseLocation())
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and input.UserInputType == Enum.UserInputType.MouseMovement then
+            updateSlider(input.Position)
+        end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local mousePos = UserInputService:GetMouseLocation()
-            local btnAbsPos = btn.AbsolutePosition
-            local btnSize = btn.AbsoluteSize
-            
-            if mousePos.X < btnAbsPos.X or mousePos.X > btnAbsPos.X + btnSize.X or
-               mousePos.Y < btnAbsPos.Y or mousePos.Y > btnAbsPos.Y + btnSize.Y then
-                closeDropdown()
-            end
+            sliding = false
         end
     end)
 end
@@ -505,18 +580,25 @@ createToggle("Проверка на земле", yOffset, "bhopGroundCheck", fal
 yOffset = yOffset + 60
 
 -- Секция: 3rd Person
-createSectionHeader("📷 КАМЕРА", yOffset)
+createSectionHeader("📷 КАМЕРА (3-Е ЛИЦО)", yOffset)
 yOffset = yOffset + 30
-local thirdPersonLabel = Instance.new("TextLabel")
-thirdPersonLabel.Size = UDim2.new(1, -20, 0, 25)
-thirdPersonLabel.Position = UDim2.new(0, 10, 0, yOffset)
-thirdPersonLabel.BackgroundTransparency = 1
-thirdPersonLabel.Text = "Нажми P для переключения вида"
-thirdPersonLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
-thirdPersonLabel.TextSize = 12
-thirdPersonLabel.Font = Enum.Font.Gotham
-thirdPersonLabel.TextXAlignment = Enum.TextXAlignment.Left
-thirdPersonLabel.Parent = content
+createToggle("Включить 3-е лицо", yOffset, "thirdPersonEnabled", false)
+yOffset = yOffset + 55
+createSlider("Дистанция", 3, 12, yOffset, "thirdPersonDistance", function(v) return tostring(math.floor(v * 10) / 10) .. " м" end)
+yOffset = yOffset + 65
+createSlider("Высота камеры", 0.5, 3, yOffset, "thirdPersonHeight", function(v) return tostring(math.floor(v * 10) / 10) .. " м" end)
+
+yOffset = yOffset + 70
+local hintLabel = Instance.new("TextLabel")
+hintLabel.Size = UDim2.new(1, -20, 0, 25)
+hintLabel.Position = UDim2.new(0, 10, 0, yOffset)
+hintLabel.BackgroundTransparency = 1
+hintLabel.Text = "💡 Или нажми P для быстрого переключения"
+hintLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
+hintLabel.TextSize = 11
+hintLabel.Font = Enum.Font.Gotham
+hintLabel.TextXAlignment = Enum.TextXAlignment.Left
+hintLabel.Parent = content
 
 yOffset = yOffset + 40
 
@@ -570,4 +652,10 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 updateCharacter()
 
-print("✅ BloxStrike загружен! Нажми INSERT для меню, P для 3-го лица")
+-- Автоматически включаем 3 лицо при старте (для теста)
+-- setThirdPerson(true) -- раскомментируй если хочешь автоматически включать
+
+print("✅ BloxStrike загружен!")
+print("📌 Нажми INSERT для меню")
+print("🎯 P для переключения 1/3 лица")
+print("📷 В меню можно настроить дистанцию и высоту камеры")
