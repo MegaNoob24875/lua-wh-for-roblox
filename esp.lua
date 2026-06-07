@@ -1,11 +1,11 @@
 -- ============================================================================
--- FREE PASS EXPLOIT V3 - СПЕЦИАЛЬНО ДЛЯ MURDER MYSTERY 2
--- Перехват кастомных покупок (радио, эмоции, скины)
+-- FREE PASS EXPLOIT V4 - С FIXED МЕНЮ (INSERT + ПЕРЕТАСКИВАНИЕ)
+-- Для XENO | Murder Mystery 2 + любые другие игры
 -- ============================================================================
 
 print("\n\n\n\n\n\n\n\n\n\n")
 print("═══════════════════════════════════════════════════════════════")
-print("     FREE PASS EXPLOIT v3.0 | MM2 + XENO OPTIMIZED")
+print("     FREE PASS EXPLOIT v4.0 | INSERT to toggle | Drag enabled")
 print("═══════════════════════════════════════════════════════════════")
 
 -- ============================================================================
@@ -21,47 +21,73 @@ local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local capturedItems = {}  -- перехваченные предметы
+local capturedItems = {}
 local autoSpamActive = false
 local spamThread = nil
 local menuGui = nil
 local itemContainer = nil
+local menuVisible = true  -- меню видимо по умолчанию
 
 print("[✓] Игрок: " .. player.Name)
-print("[✓] Игра: " .. (game.PlaceId == 142823291 and "Murder Mystery 2" or "Другая игра"))
 
 -- ============================================================================
--- ПОИСК ID ПРЕДМЕТОВ В MM2
+-- ФУНКЦИИ ПЕРЕТАСКИВАНИЯ (РАБОТАЮТ С ЛЮБОЙ КНОПКОЙ МЫШИ)
 -- ============================================================================
+local function makeDraggable(frame, dragHandle)
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    local handle = dragHandle or frame
+    
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
 
--- Функция для извлечения ID из GUI кнопки MM2
-local function extractMM2ItemId(button)
-    -- Проверяем текст кнопки на наличие Radio ID
+-- ============================================================================
+-- ПОИСК ID ПРЕДМЕТОВ
+-- ============================================================================
+local function extractItemId(button)
     local text = button.Text or ""
     local name = button.Name or ""
     
-    -- Стандартные ID радио в MM2 (известные значения)
-    local knownRadios = {
-        ["475"] = 475,    -- Radio ID
-        ["500"] = 500,    -- Radio ID
-        ["400"] = 400,    -- Radio ID
-        ["539.00P"] = 539 -- Radio ID с ценой
+    local knownIds = {
+        ["475"] = 475, ["500"] = 500, ["400"] = 400, ["539"] = 539,
+        ["radio"] = 475, ["Radio"] = 475
     }
     
-    -- Ищем в тексте
-    for pattern, id in pairs(knownRadios) do
+    for pattern, id in pairs(knownIds) do
         if text:find(pattern) or name:find(pattern) then
             return id
         end
     end
     
-    -- Ищем числа в тексте (от 1 до 9999)
     local numbers = text:match("(%d+)")
     if numbers and tonumber(numbers) and tonumber(numbers) > 0 and tonumber(numbers) < 10000 then
         return tonumber(numbers)
     end
     
-    -- Проверяем атрибуты
     for k, v in pairs(button:GetAttributes()) do
         if type(v) == "number" and v > 0 and v < 10000 then
             return v
@@ -71,223 +97,113 @@ local function extractMM2ItemId(button)
     return nil
 end
 
--- ============================================================================
--- ГЛАВНЫЙ МЕТОД: ПЕРЕХВАТ REMOTEEVENT В MM2
--- ============================================================================
-
-local function hookMM2Remotes()
-    print("[→] Поиск RemoteEvent в MM2...")
-    
-    local remotesFound = {}
-    
-    -- Ищем все RemoteEvent в игре
-    for _, remote in ipairs(game:GetDescendants()) do
-        if remote:IsA("RemoteEvent") then
-            local name = remote.Name
-            -- В MM2 покупки обычно через Remote с именами: BuyItem, Purchase, Shop, Radio
-            if name:lower():match("buy") or 
-               name:lower():match("purchase") or 
-               name:lower():match("shop") or
-               name:lower():match("radio") or
-               name:lower():match("item") then
-                table.insert(remotesFound, remote)
-            end
-        end
-    end
-    
-    print("[→] Найдено " .. #remotesFound .. " потенциальных RemoteEvent для покупок")
-    
-    -- Хукинг каждого Remote
-    for _, remote in ipairs(remotesFound) do
-        pcall(function()
-            local originalFire = remote.FireServer
-            
-            remote.FireServer = function(self, ...)
-                local args = {...}
-                local detectedId = nil
-                local detectedPrice = nil
-                
-                -- Анализ аргументов на наличие ID предмета
-                for i, arg in ipairs(args) do
-                    -- Прямой числовой ID
-                    if type(arg) == "number" and arg > 0 and arg < 10000 then
-                        detectedId = arg
-                    end
-                    -- Строковый ID
-                    if type(arg) == "string" and tonumber(arg) and tonumber(arg) > 0 then
-                        detectedId = tonumber(arg)
-                    end
-                    -- Таблица с ID
-                    if type(arg) == "table" then
-                        if arg.id then detectedId = arg.id end
-                        if arg.ItemId then detectedId = arg.ItemId end
-                        if arg.price then detectedPrice = arg.price end
-                    end
-                end
-                
-                -- Если нашли ID предмета
-                if detectedId and not capturedItems[tostring(detectedId)] then
-                    local itemName = getItemName(detectedId)
-                    capturedItems[tostring(detectedId)] = {
-                        id = tostring(detectedId),
-                        name = itemName,
-                        price = detectedPrice or "FREE",
-                        timestamp = os.date("%H:%M:%S"),
-                        remote = remote.Name
-                    }
-                    print("[!] ПЕРЕХВАЧЕН ПРЕДМЕТ: " .. itemName .. " (ID: " .. detectedId .. ") через " .. remote.Name)
-                    pcall(renderItemList)
-                end
-                
-                -- БЛОКИРУЕМ оригинальный вызов (покупка не происходит, но предмет перехвачен)
-                -- Если хотим всё равно отправить, раскомментировать:
-                -- return originalFire(self, unpack(args))
-                return nil
-            end
-        end)
-    end
-end
-
--- Получение имени предмета по ID (для MM2)
 local function getItemName(id)
-    local mm2Items = {
-        [475] = "Radio 475",
-        [500] = "Radio 500", 
-        [400] = "Radio 400",
-        [539] = "Radio Premium",
-        [1] = "Common Knife",
-        [2] = "Rare Knife",
-        [3] = "Legendary Knife",
-        [4] = "Godly Knife",
-        [5] = "Common Gun",
-        [6] = "Rare Gun",
-        [7] = "Legendary Gun",
-        [8] = "Godly Gun",
-        [9] = "Emote Dance",
-        [10] = "Emote Laugh",
-        [11] = "Effect Fire",
-        [12] = "Effect Hearts",
+    local items = {
+        [475] = "📻 Radio 475", [500] = "📻 Radio 500", [400] = "📻 Radio 400",
+        [539] = "📻 Radio Premium", [1] = "🔪 Common Knife", [2] = "🔪 Rare Knife",
+        [3] = "🔪 Legendary Knife", [4] = "✨ Godly Knife", [5] = "🔫 Common Gun",
+        [6] = "🔫 Rare Gun", [7] = "🔫 Legendary Gun", [8] = "✨ Godly Gun",
+        [9] = "💃 Emote Dance", [10] = "😆 Emote Laugh",
     }
-    return mm2Items[id] or ("Item #" .. id)
+    return items[id] or ("📦 Item #" .. id)
 end
 
 -- ============================================================================
--- МЕТОД АКТИВАЦИИ ПРЕДМЕТА (ПРИНУДИТЕЛЬНАЯ ВЫДАЧА)
+-- АКТИВАЦИЯ ПРЕДМЕТА
 -- ============================================================================
-
 local function activateItem(itemId)
-    print("[→] Активация предмета ID: " .. itemId)
+    print("[→] Активация ID: " .. itemId)
     
-    -- МЕТОД 1: Прямой вызов Signal (если сработает)
     pcall(function()
         MarketplaceService:SignalPromptProductPurchaseFinished(player.UserId, tonumber(itemId), true)
     end)
-    
-    -- МЕТОД 2: Через PromptPurchase
     pcall(function()
         MarketplaceService:PromptPurchase(player, tonumber(itemId))
     end)
     
-    -- МЕТОД 3: Поиск и вызов Remote для MM2
     for _, remote in ipairs(game:GetDescendants()) do
         if remote:IsA("RemoteEvent") then
             local name = remote.Name:lower()
-            if name:match("buy") or name:match("purchase") or name:match("give") or name:match("reward") then
-                pcall(function()
-                    remote:FireServer(tonumber(itemId), "activate")
-                    remote:FireServer({ItemId = tonumber(itemId), Action = "Grant"})
-                end)
+            if name:match("buy") or name:match("purchase") or name:match("give") then
+                pcall(function() remote:FireServer(tonumber(itemId), "activate") end)
+                pcall(function() remote:FireServer({ItemId = tonumber(itemId), Action = "Grant"}) end)
             end
         end
     end
     
-    print("[✓] Активация выполнена для " .. itemId)
+    print("[✓] Активация выполнена")
 end
 
 -- ============================================================================
--- ПЕРЕХВАТ КНОПОК GUI (РАБОТАЕТ ДАЖЕ БЕЗ REMOTE)
+-- ПЕРЕХВАТЧИКИ
 -- ============================================================================
-
-local function hookMM2Buttons()
-    print("[→] Настройка перехвата GUI кнопок MM2...")
-    
-    local processedButtons = {}
-    
-    local function scanForPurchaseButtons()
-        for _, btn in ipairs(game:GetDescendants()) do
-            if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and not processedButtons[btn] then
-                local text = (btn.Text or ""):lower()
-                local name = (btn.Name or ""):lower()
-                
-                -- Кнопки покупки в MM2 обычно содержат "buy", "purchase" или цены
-                if text:match("buy") or name:match("buy") or 
-                   text:match("purchase") or text:match("radio") or
-                   text:match("%d+") then  -- содержит число (цену)
-                    
-                    processedButtons[btn] = true
-                    
-                    btn.MouseButton1Click:Connect(function()
-                        local itemId = extractMM2ItemId(btn)
+local function hookRemotes()
+    for _, remote in ipairs(game:GetDescendants()) do
+        if remote:IsA("RemoteEvent") and remote:IsA("RemoteEvent") then
+            pcall(function()
+                local original = remote.FireServer
+                remote.FireServer = function(self, ...)
+                    local args = {...}
+                    for _, arg in ipairs(args) do
+                        local id = nil
+                        if type(arg) == "number" and arg > 0 and arg < 10000 then id = arg
+                        elseif type(arg) == "string" and tonumber(arg) then id = tonumber(arg)
+                        elseif type(arg) == "table" then
+                            if arg.id then id = arg.id
+                            elseif arg.ItemId then id = arg.ItemId end
+                        end
                         
-                        if itemId and not capturedItems[tostring(itemId)] then
-                            capturedItems[tostring(itemId)] = {
-                                id = tostring(itemId),
-                                name = getItemName(itemId),
-                                timestamp = os.date("%H:%M:%S"),
-                                source = "button_click"
+                        if id and not capturedItems[tostring(id)] then
+                            capturedItems[tostring(id)] = {
+                                id = tostring(id), name = getItemName(id),
+                                timestamp = os.date("%H:%M:%S")
                             }
-                            print("[!] ПЕРЕХВАЧЕН ПРЕДМЕТ: " .. getItemName(itemId) .. " (через кнопку)")
+                            print("[!] ПЕРЕХВАЧЕН: " .. getItemName(id))
                             pcall(renderItemList)
                         end
-                    end)
+                    end
+                    return nil
                 end
-            end
+            end)
         end
     end
-    
-    -- Сканируем каждую секунду
+end
+
+local function hookButtons()
     spawn(function()
         while menuGui and menuGui.Parent do
-            pcall(scanForPurchaseButtons)
+            pcall(function()
+                for _, btn in ipairs(game:GetDescendants()) do
+                    if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and not btn._hooked then
+                        local text = (btn.Text or ""):lower()
+                        if text:match("buy") or text:match("purchase") or text:match("radio") or text:match("%d+") then
+                            btn._hooked = true
+                            btn.MouseButton1Click:Connect(function()
+                                local id = extractItemId(btn)
+                                if id and not capturedItems[tostring(id)] then
+                                    capturedItems[tostring(id)] = {
+                                        id = tostring(id), name = getItemName(id),
+                                        timestamp = os.date("%H:%M:%S")
+                                    }
+                                    print("[!] ПЕРЕХВАЧЕН: " .. getItemName(id))
+                                    pcall(renderItemList)
+                                end
+                            end)
+                        end
+                    end
+                end
+            end)
             task.wait(1)
         end
     end)
 end
 
 -- ============================================================================
--- ДОПОЛНИТЕЛЬНО: ОТСЛЕЖИВАНИЕ DIALOG/ПОДТВЕРЖДЕНИЙ
--- ============================================================================
-
-local function hookPurchaseDialogs()
-    -- Отслеживаем создание новых окон подтверждения покупки
-    game:GetService("CoreGui").DescendantAdded:Connect(function(obj)
-        if obj:IsA("Frame") or obj:IsA("ScreenGui") then
-            -- Ищем кнопки "Buy", "Confirm", "Purchase" в диалогах
-            task.wait(0.1)
-            for _, btn in ipairs(obj:GetDescendants()) do
-                if btn:IsA("TextButton") then
-                    local text = (btn.Text or ""):lower()
-                    if text:match("buy") or text:match("confirm") or text:match("purchase") then
-                        -- Автоматически нажимаем кнопку подтверждения
-                        pcall(function()
-                            btn:Click()
-                            print("[!] Автоподтверждение покупки")
-                        end)
-                    end
-                end
-            end
-        end
-    end)
-end
-
--- ============================================================================
--- UI МЕНЮ
+-- UI МЕНЮ (С ПОДДЕРЖКОЙ INSERT И ПЕРЕТАСКИВАНИЕМ)
 -- ============================================================================
 
 function renderItemList()
-    if not itemContainer or not itemContainer.Parent then
-        return
-    end
+    if not itemContainer or not itemContainer.Parent then return end
     
     pcall(function()
         for _, child in ipairs(itemContainer:GetChildren()) do
@@ -312,7 +228,6 @@ function renderItemList()
             corner.CornerRadius = UDim.new(0, 6)
             corner.Parent = frame
             
-            -- Название
             local nameLabel = Instance.new("TextLabel")
             nameLabel.Size = UDim2.new(0.6, -10, 0, 25)
             nameLabel.Position = UDim2.new(0, 10, 0, 5)
@@ -324,7 +239,6 @@ function renderItemList()
             nameLabel.Font = Enum.Font.SourceSansBold
             nameLabel.Parent = frame
             
-            -- ID и время
             local infoLabel = Instance.new("TextLabel")
             infoLabel.Size = UDim2.new(0.6, -10, 0, 16)
             infoLabel.Position = UDim2.new(0, 10, 0, 33)
@@ -336,10 +250,9 @@ function renderItemList()
             infoLabel.Font = Enum.Font.SourceSans
             infoLabel.Parent = frame
             
-            -- Кнопка Активации
             local activateBtn = Instance.new("TextButton")
-            activateBtn.Size = UDim2.new(0, 100, 0, 35)
-            activateBtn.Position = UDim2.new(1, -110, 0, 12)
+            activateBtn.Size = UDim2.new(0, 90, 0, 35)
+            activateBtn.Position = UDim2.new(1, -100, 0, 12)
             activateBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
             activateBtn.Text = "✅ АКТИВ"
             activateBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -366,7 +279,7 @@ function renderItemList()
             emptyLabel.Size = UDim2.new(1, -20, 0, 80)
             emptyLabel.Position = UDim2.new(0, 10, 0, 20)
             emptyLabel.BackgroundTransparency = 1
-            emptyLabel.Text = "📭 НЕТ ПЕРЕХВАЧЕННЫХ ПРЕДМЕТОВ\n\nНажмите на кнопку 'BUY' (Купить) в магазине MM2\nПредмет автоматически перехватится и появится здесь"
+            emptyLabel.Text = "📭 НЕТ ПЕРЕХВАЧЕННЫХ ПРЕДМЕТОВ\n\nНажмите на кнопку 'BUY' в магазине\nПредмет автоматически перехватится"
             emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
             emptyLabel.TextSize = 12
             emptyLabel.Font = Enum.Font.SourceSans
@@ -379,17 +292,13 @@ function renderItemList()
     end)
 end
 
--- ============================================================================
--- СОЗДАНИЕ МЕНЮ
--- ============================================================================
-
 local function createMenu()
     if menuGui and menuGui.Parent then
         menuGui:Destroy()
     end
     
     menuGui = Instance.new("ScreenGui")
-    menuGui.Name = "MM2FreeItemsExploit"
+    menuGui.Name = "FreePassExploit"
     menuGui.ResetOnSpawn = false
     
     pcall(function() menuGui.Parent = CoreGui end)
@@ -397,18 +306,20 @@ local function createMenu()
         pcall(function() menuGui.Parent = player:WaitForChild("PlayerGui") end)
     end
     
+    -- ГЛАВНОЕ ОКНО (можно перетаскивать за заголовок)
     local mainFrame = Instance.new("Frame")
     mainFrame.Size = UDim2.new(0, 420, 0, 520)
     mainFrame.Position = UDim2.new(0.5, -210, 0.5, -260)
     mainFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 35)
     mainFrame.BorderSizePixel = 0
+    mainFrame.Visible = menuVisible
     mainFrame.Parent = menuGui
     
     local mainCorner = Instance.new("UICorner")
     mainCorner.CornerRadius = UDim.new(0, 12)
     mainCorner.Parent = mainFrame
     
-    -- Заголовок
+    -- ЗАГОЛОВОК (за него перетаскиваем)
     local titleBar = Instance.new("Frame")
     titleBar.Size = UDim2.new(1, 0, 0, 45)
     titleBar.BackgroundColor3 = Color3.fromRGB(40, 50, 80)
@@ -419,18 +330,21 @@ local function createMenu()
     titleCorner.CornerRadius = UDim.new(0, 12)
     titleCorner.Parent = titleBar
     
+    -- ПЕРЕТАСКИВАНИЕ - работает за заголовок
+    makeDraggable(mainFrame, titleBar)
+    
     local titleText = Instance.new("TextLabel")
-    titleText.Size = UDim2.new(1, -50, 1, 0)
+    titleText.Size = UDim2.new(1, -80, 1, 0)
     titleText.Position = UDim2.new(0, 15, 0, 0)
     titleText.BackgroundTransparency = 1
-    titleText.Text = "🎮 MM2 FREE ITEMS | XENO"
+    titleText.Text = "🎮 FREE PASS EXPLOIT | XENO"
     titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
     titleText.TextXAlignment = Enum.TextXAlignment.Left
-    titleText.TextSize = 15
+    titleText.TextSize = 14
     titleText.Font = Enum.Font.SourceSansBold
     titleText.Parent = titleBar
     
-    -- Закрыть
+    -- КНОПКА ЗАКРЫТИЯ (крестик)
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0, 32, 0, 32)
     closeBtn.Position = UDim2.new(1, -40, 0, 6)
@@ -450,7 +364,7 @@ local function createMenu()
         print("[✓] Меню закрыто")
     end)
     
-    -- Список
+    -- СПИСОК ПРЕДМЕТОВ
     itemContainer = Instance.new("ScrollingFrame")
     itemContainer.Size = UDim2.new(1, -10, 1, -95)
     itemContainer.Position = UDim2.new(0, 5, 0, 50)
@@ -465,7 +379,7 @@ local function createMenu()
     containerCorner.CornerRadius = UDim.new(0, 8)
     containerCorner.Parent = itemContainer
     
-    -- Нижняя панель
+    -- НИЖНЯЯ ПАНЕЛЬ
     local bottomBar = Instance.new("Frame")
     bottomBar.Size = UDim2.new(1, 0, 0, 50)
     bottomBar.Position = UDim2.new(0, 0, 1, -50)
@@ -477,7 +391,7 @@ local function createMenu()
     bottomCorner.CornerRadius = UDim.new(0, 12)
     bottomCorner.Parent = bottomBar
     
-    -- Авто-спам
+    -- КНОПКА АВТО-СПАМ
     local autoBtn = Instance.new("TextButton")
     autoBtn.Size = UDim2.new(0, 170, 0, 34)
     autoBtn.Position = UDim2.new(0.5, -85, 0, 8)
@@ -498,12 +412,12 @@ local function createMenu()
             if spamThread then task.cancel(spamThread) end
             autoBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 50)
             autoBtn.Text = "🔄 АВТО-АКТИВАЦИЯ"
-            print("[✓] Авто-активация остановлена")
+            print("[✓] Авто-спам остановлен")
         else
             autoSpamActive = true
             autoBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 60)
             autoBtn.Text = "⏹ ОСТАНОВИТЬ"
-            print("[✓] Авто-активация запущена")
+            print("[✓] Авто-спам запущен")
             
             spamThread = task.spawn(function()
                 while autoSpamActive do
@@ -519,35 +433,69 @@ local function createMenu()
         end
     end)
     
+    -- ИНФОСТРОКА
+    local infoLabel = Instance.new("TextLabel")
+    infoLabel.Size = UDim2.new(1, -20, 0, 18)
+    infoLabel.Position = UDim2.new(0, 10, 0, -22)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.Text = "💡 INSERT = скрыть/показать | Перетащите за заголовок | Нажмите BUY для перехвата"
+    infoLabel.TextColor3 = Color3.fromRGB(120, 130, 160)
+    infoLabel.TextSize = 10
+    infoLabel.Font = Enum.Font.SourceSans
+    infoLabel.Parent = bottomBar
+    
     renderItemList()
-    print("[✓] Меню создано!")
+    print("[✓] Меню создано! Нажмите INSERT для скрытия/показа")
+    
+    return mainFrame
+end
+
+-- ============================================================================
+-- УПРАВЛЕНИЕ ПО КЛАВИШЕ INSERT
+-- ============================================================================
+local mainFrameReference = nil
+
+local function setupInsertToggle()
+    print("[→] Настройка клавиши INSERT для открытия/закрытия меню...")
+    
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        -- Код 45 = Insert (на некоторых клавиатурах может быть 0x2D)
+        if input.KeyCode == Enum.KeyCode.Insert then
+            if menuGui and menuGui.Parent then
+                -- Ищем главное окно внутри GUI
+                for _, child in ipairs(menuGui:GetChildren()) do
+                    if child:IsA("Frame") then
+                        menuVisible = not menuVisible
+                        child.Visible = menuVisible
+                        print("[✓] Меню " .. (menuVisible and "показано" or "скрыто") .. " (INSERT)")
+                        break
+                    end
+                end
+            end
+        end
+    end)
+    
+    print("[✓] INSERT настроен")
 end
 
 -- ============================================================================
 -- ЗАПУСК
 -- ============================================================================
 
-print("\n[→] Запуск эксплойта для MM2...")
+print("\n[→] Запуск эксплойта...")
 
--- Запускаем все перехватчики
-pcall(hookMM2Remotes)
-pcall(hookMM2Buttons)
-pcall(hookPurchaseDialogs)
-
--- Создаем меню
-pcall(createMenu)
+pcall(hookRemotes)
+pcall(hookButtons)
+local mainFrame = pcall(createMenu) and mainFrame or nil
+pcall(setupInsertToggle)
 
 print("\n═══════════════════════════════════════════════════════════════")
-print("  ✅ ГОТОВО! Инструкция:")
+print("  ✅ ГОТОВО! ФУНКЦИИ:")
 print("  ")
-print("  1. Откройте магазин (Shop) в Murder Mystery 2")
-print("  2. Нажмите на кнопку 'BUY' у любого радио/предмета")
-print("  3. Предмет появится в меню выше")
-print("  4. Нажмите 'АКТИВ' для получения")
+print("  🖱 ПЕРЕТАСКИВАНИЕ: зажмите ЛКМ на заголовке и тяните")
+print("  ⌨️ INSERT: скрыть/показать меню")
+print("  🛒 Нажмите BUY в магазине -> предмет перехватится")
+print("  ✅ Нажмите АКТИВ для получения")
 print("═══════════════════════════════════════════════════════════════\n")
-
--- Дополнительная информация
-print("[!] ВНИМАНИЕ ДЛЯ MM2:")
-print("[!] - Радио с ID 475,500,400,539 должны перехватиться")
-print("[!] - Если не появляется - нажмите 'BUY' несколько раз")
-print("[!] - После активации проверьте инвентарь\n")
